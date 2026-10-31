@@ -59,6 +59,10 @@ Database: `db/life.db` (SQLite). Use the `sqlite3` command. Schema: `db/schema.s
 
 If something's ambiguous (which Mike?), ask once. Don't guess on people.
 
+### The dashboard
+
+Christian also has a private web dashboard over this same database. From it he can tick off tasks and groceries, mark meals eaten, mark today's focus done, add tasks, and move or park threads. So the database may change without a Telegram message: always read current state before answering, and don't ask him to tell you something the database already shows. Never edit anything in `dashboard/`.
+
 ### WHOOP data
 
 WHOOP syncs automatically: `scripts/whoop.py sync` runs at 6:25am, 10am, and 8pm and writes recovery, HRV, resting HR, sleep hours, sleep performance, strain, and calories burned to `metrics` with `source='whoop_api'`. You don't need to ask him for these numbers.

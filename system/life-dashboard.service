@@ -1,0 +1,18 @@
+[Unit]
+Description=Life dashboard (private web view of the life CRM)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=agent
+WorkingDirectory=/home/agent/life-agent
+Environment=AGENT_DIR=/home/agent/life-agent
+Environment=DASHBOARD_PORT=8787
+# Optional: DASHBOARD_ALLOWED_LOGINS=you@example.com (see SETUP.md)
+EnvironmentFile=-/home/agent/life-agent/local/dashboard.env
+ExecStart=/home/agent/.bun/bin/bun run /home/agent/life-agent/dashboard/server.ts
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

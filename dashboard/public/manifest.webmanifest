@@ -1,0 +1,9 @@
+{
+  "name": "Life",
+  "short_name": "Life",
+  "start_url": "/#today",
+  "display": "standalone",
+  "background_color": "#f9f9f7",
+  "theme_color": "#f9f9f7",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

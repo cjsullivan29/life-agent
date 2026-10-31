@@ -33,8 +33,12 @@ as_agent "AGENT_DIR='$DEST' ./scripts/migrate.sh"
 
 echo "5/5 Updating the schedule and restarting"
 install -m 644 "$DEST/system/life-agent.cron" /etc/cron.d/life-agent
-install -m 644 "$DEST/system/life-agent.service" /etc/systemd/system/life-agent.service
+for unit in "$DEST"/system/*.service; do
+  install -m 644 "$unit" "/etc/systemd/system/$(basename "$unit")"
+done
 systemctl daemon-reload
+systemctl enable --quiet life-dashboard 2>/dev/null || true
 systemctl restart life-agent
+systemctl restart life-dashboard
 echo
 echo "Done. Now running: $(as_agent 'git log -1 --format="%h %s"')"

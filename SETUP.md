@@ -247,6 +247,43 @@ bash /home/agent/life-agent/scripts/update.sh
 
 The `exit` returns you to root for the last line. A backup of the old folder is kept as `life-agent.pre-git-<date>`.
 
+## The dashboard (private, through Tailscale)
+
+The dashboard is a web page over your life database: Today, Health, Life, Food, and Loops, with a **Together** switch for check-ins with Maddie. It runs on the server but has **no public address**: it only answers on the server itself, and Tailscale (a private network between your own devices) carries it to your phone and laptop. `update.sh` installs and starts it; these steps make it reachable.
+
+**1. Put the server on Tailscale**, as root:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up
+```
+
+`tailscale up` prints a login link. Open it and sign in (create a free Tailscale account if you don't have one).
+
+**2. Serve the dashboard on your private network:**
+
+```bash
+tailscale serve --bg 8787
+```
+
+If it says HTTPS isn't enabled for your network, it prints a link to turn it on in the Tailscale admin console. Do that, then run the command again. It ends by printing your dashboard's address, like `https://localhost.your-tailnet.ts.net`. (`tailscale serve status` shows it again later.)
+
+**3. Your phone and laptop:** install the Tailscale app, sign in with the same account, and open that address. On iPhone: Share → **Add to Home Screen** makes it open like an app.
+
+**4. Lock it to you (recommended).** Tailscale tells the dashboard who's visiting. Allow only your login:
+
+```bash
+echo 'DASHBOARD_ALLOWED_LOGINS=your-tailscale-login@example.com' > /home/agent/life-agent/local/dashboard.env
+chown agent:agent /home/agent/life-agent/local/dashboard.env
+systemctl restart life-dashboard
+```
+
+Use the email you signed in to Tailscale with. If the page then says "Not allowed," the email doesn't match exactly.
+
+**Maddie on her own laptop:** you can share just this server with her Tailscale account (Tailscale admin console → the machine → Share), then add her login to `DASHBOARD_ALLOWED_LOGINS`, comma-separated. Keep in mind Together mode is a display filter, not a lock: anyone you let in can switch it off.
+
+**If it won't load:** `systemctl status life-dashboard --no-pager` on the server shows whether it's running, and `journalctl -u life-dashboard -n 30` shows its recent output.
+
 ## Updating
 
 Whenever there's a new version, on the server as root:
