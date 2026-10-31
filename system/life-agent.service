@@ -1,0 +1,16 @@
+[Unit]
+Description=Life agent (Claude Code + Telegram channel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=agent
+WorkingDirectory=/home/agent/life-agent
+ExecStart=/usr/bin/tmux new-session -d -s lifeagent /home/agent/life-agent/scripts/start-agent.sh
+ExecStop=/usr/bin/tmux kill-session -t lifeagent
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

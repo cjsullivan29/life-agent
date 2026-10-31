@@ -1,0 +1,25 @@
+# Life agent schedule. Times are server-local (set the server to America/Indianapolis).
+# Format: minute hour day-of-month month day-of-week user command
+
+# WHOOP sync: before the morning brief, mid-morning (late-scored sleep), and before the evening check-in
+25 6 * * *    agent  AGENT_DIR=/home/agent/life-agent python3 /home/agent/life-agent/scripts/whoop.py sync >/dev/null 2>>/home/agent/life-agent/log/whoop-errors.log
+0 10 * * *    agent  AGENT_DIR=/home/agent/life-agent python3 /home/agent/life-agent/scripts/whoop.py sync >/dev/null 2>>/home/agent/life-agent/log/whoop-errors.log
+0 20 * * *    agent  AGENT_DIR=/home/agent/life-agent python3 /home/agent/life-agent/scripts/whoop.py sync >/dev/null 2>>/home/agent/life-agent/log/whoop-errors.log
+
+# Morning brief, weekdays 6:45am (after training)
+45 6 * * 1-5  agent  /home/agent/life-agent/scripts/routine.sh morning-brief
+
+# Evening check-in, daily 8:30pm
+30 20 * * *   agent  /home/agent/life-agent/scripts/routine.sh evening-checkin
+
+# Meal plan for the coming week, Saturday 9:00am
+0 9 * * 6     agent  /home/agent/life-agent/scripts/routine.sh meal-plan
+
+# Weekly review, Sunday 7:00pm
+0 19 * * 0    agent  /home/agent/life-agent/scripts/routine.sh weekly-review
+
+# Nightly database backup at 3:15am
+15 3 * * *    agent  /home/agent/life-agent/scripts/backup.sh
+
+# Nightly restart at 3:30am, clears the conversation so context stays fresh (the database persists)
+30 3 * * *    root   systemctl restart life-agent
