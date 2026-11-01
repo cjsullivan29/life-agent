@@ -319,7 +319,11 @@ Bun.serve({
   async fetch(req) {
     if (ALLOWED.length) {
       const login = (req.headers.get("tailscale-user-login") || "").toLowerCase();
-      if (!ALLOWED.includes(login)) return new Response("Not allowed.", { status: 403 });
+      if (!ALLOWED.includes(login)) {
+        const who = login ? `Signed in to Tailscale as: ${login}` : "No Tailscale login came through (open it via your https://...ts.net address).";
+        return new Response(`Not allowed.\n\n${who}\nAllowed: ${ALLOWED.join(", ")}\n\nTo fix, put the login above in local/dashboard.env and restart life-dashboard.`,
+          { status: 403, headers: { "content-type": "text/plain; charset=utf-8" } });
+      }
     }
     const url = new URL(req.url);
     const p = url.pathname;
