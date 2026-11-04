@@ -296,6 +296,8 @@ sudo -u agent /home/agent/life-agent/scripts/alert.sh "Test alert"
 
 If no text arrives, `cat /home/agent/life-agent/log/alerts.log` says why.
 
+The same check watches for Claude usage limits. A limited agent looks alive but can't reply, so if the agent's screen shows a usage-limit message, you get a text quoting it, and another once it's working again.
+
 ## Off-server backups (one time, about 15 minutes)
 
 The nightly backup keeps 30 days of copies on the server itself. If the server is ever lost, those go with it. This adds an encrypted copy somewhere else each night.

@@ -236,7 +236,8 @@ def recovery_rows(records, sleep_end_by_id):
             continue
         for key, val in (("whoop_recovery", s.get("recovery_score")),
                          ("whoop_hrv", s.get("hrv_rmssd_milli")),
-                         ("resting_hr", s.get("resting_heart_rate"))):
+                         ("resting_hr", s.get("resting_heart_rate")),
+                         ("skin_temp_c", s.get("skin_temp_celsius"))):  # WHOOP 4.0+; absent on older straps
             if val is not None:
                 rows.append((day, key, round(float(val), 1)))
     return rows
@@ -254,6 +255,8 @@ def sleep_rows(records):
         if r.get("score_state") != "SCORED" or not r.get("score"):
             continue
         s = r["score"]
+        if s.get("respiratory_rate") is not None:
+            rows.append((day, "respiratory_rate", round(float(s["respiratory_rate"]), 1)))
         if s.get("sleep_performance_percentage") is not None:
             rows.append((day, "whoop_sleep_perf", round(float(s["sleep_performance_percentage"]), 1)))
         st = s.get("stage_summary") or {}
