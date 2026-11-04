@@ -3,7 +3,7 @@
 WHOOP -> life CRM sync. Standard library only.
 
   python3 whoop.py auth            one-time: connect your WHOOP account
-  python3 whoop.py sync [--days N] pull recent recovery, sleep, and strain into the database
+  python3 whoop.py sync [--days N] pull recent recovery, sleep, strain, and workouts into the database
   python3 whoop.py status          show connection and last-sync info
 
 Secrets live in ~/life-agent/secrets/ (owner-only permissions). Never commit or share that folder.
@@ -284,6 +284,44 @@ def cycle_rows(records):
     return rows
 
 
+def local_dt(ts):
+    t = parse_ts(ts)
+    if not t:
+        return None
+    return (t.astimezone(LOCAL_TZ) if LOCAL_TZ else t.astimezone()).strftime("%Y-%m-%d %H:%M")
+
+
+def workout_rows(records):
+    """One dict per scored workout, ready for the workouts table."""
+    rows = []
+    for w in records:
+        if w.get("score_state") != "SCORED" or not w.get("score") or not w.get("id"):
+            continue
+        s = w["score"]
+        start, end = parse_ts(w.get("start")), parse_ts(w.get("end"))
+        z = s.get("zone_durations") or {}
+        mins = lambda k: round((z.get(k) or 0) / 60000, 1) if z else None
+        kj = s.get("kilojoule")
+        rows.append({
+            "whoop_id": str(w["id"]),
+            "workout_date": local_date(w.get("start")),
+            "start_at": local_dt(w.get("start")),
+            "end_at": local_dt(w.get("end")),
+            "sport": (w.get("sport_name") or "").strip().lower() or None,
+            "duration_min": round((end - start).total_seconds() / 60, 1) if start and end else None,
+            "strain": round(float(s["strain"]), 1) if s.get("strain") is not None else None,
+            "avg_hr": s.get("average_heart_rate"),
+            "max_hr": s.get("max_heart_rate"),
+            "kcal": round(float(kj) / 4.184) if kj is not None else None,
+            "distance_m": s.get("distance_meter"),
+            "percent_recorded": s.get("percent_recorded"),
+            "z0_min": mins("zone_zero_milli"), "z1_min": mins("zone_one_milli"),
+            "z2_min": mins("zone_two_milli"), "z3_min": mins("zone_three_milli"),
+            "z4_min": mins("zone_four_milli"), "z5_min": mins("zone_five_milli"),
+        })
+    return [r for r in rows if r["workout_date"]]
+
+
 # ---------------------------------------------------------------- store
 
 def store(rows):
@@ -302,6 +340,30 @@ def store(rows):
         con.close()
 
 
+WORKOUT_COLS = ["workout_date", "start_at", "end_at", "sport", "duration_min", "strain", "avg_hr",
+                "max_hr", "kcal", "distance_m", "percent_recorded",
+                "z0_min", "z1_min", "z2_min", "z3_min", "z4_min", "z5_min"]
+
+
+def store_workouts(rows):
+    """Upsert by WHOOP id. WHOOP fields refresh; the agent's fields (type, RPE, notes, verdict) are kept."""
+    con = sqlite3.connect(DB_PATH, timeout=30)
+    try:
+        if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='workouts'").fetchone():
+            return None  # migration 005 not applied yet
+        cols = ["whoop_id"] + WORKOUT_COLS
+        sql = (f"INSERT INTO workouts ({', '.join(cols)}, source) VALUES ({', '.join('?' * len(cols))}, '{SOURCE}') "
+               f"ON CONFLICT(whoop_id) DO UPDATE SET "
+               + ", ".join(f"{c}=excluded.{c}" for c in WORKOUT_COLS)
+               + ", synced_at=datetime('now','localtime')")
+        with con:
+            for r in rows:
+                con.execute(sql, [r[c] for c in cols])
+        return len(rows)
+    finally:
+        con.close()
+
+
 def cmd_sync(args):
     end = dt.datetime.now(dt.timezone.utc)
     start = end - dt.timedelta(days=args.days)
@@ -313,15 +375,19 @@ def cmd_sync(args):
         r_rows = recovery_rows(recs, end_by_id)
         cycles = fetch_all("/cycle", iso(start), iso(end))
         c_rows = cycle_rows(cycles)
+        workouts = fetch_all("/activity/workout", iso(start), iso(end))
+        w_rows = workout_rows(workouts)
     except RuntimeError as e:
         log(f"SYNC FAILED: {e}")
         sys.exit(1)
 
     rows = s_rows + r_rows + c_rows
     store(rows)
+    stored_w = store_workouts(w_rows)
+    w_note = f"{len(w_rows)} workouts" if stored_w is not None else "workouts skipped (run update.sh to add the table)"
     days = sorted({d for d, _, _ in rows})
     log(f"SYNC OK: {len(rows)} values over {len(days)} days "
-        f"({len(sleeps)} sleeps, {len(recs)} recoveries, {len(cycles)} cycles); "
+        f"({len(sleeps)} sleeps, {len(recs)} recoveries, {len(cycles)} cycles, {w_note}); "
         f"latest day {days[-1] if days else 'none'}")
 
 
