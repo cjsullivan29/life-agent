@@ -18,8 +18,14 @@
 # Weekly review, Sunday 7:00pm
 0 19 * * 0    agent  /home/agent/life-agent/scripts/routine.sh weekly-review
 
-# Nightly database backup at 3:15am
+# Handoff note at 3:10am: the agent writes down what tomorrow's session needs before the restart wipes the conversation
+10 3 * * *    agent  /home/agent/life-agent/scripts/routine.sh handoff
+
+# Nightly database backup at 3:15am (local copy, plus encrypted off-server copy once set up)
 15 3 * * *    agent  /home/agent/life-agent/scripts/backup.sh
 
 # Nightly restart at 3:30am, clears the conversation so context stays fresh (the database persists)
 30 3 * * *    root   systemctl restart life-agent
+
+# Health check every 10 minutes: texts Christian directly if the agent has been down for two checks in a row
+*/10 * * * *  agent  /home/agent/life-agent/scripts/healthcheck.sh

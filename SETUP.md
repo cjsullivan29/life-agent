@@ -284,6 +284,67 @@ Use the email you signed in to Tailscale with. If the page then says "Not allowe
 
 **If it won't load:** `systemctl status life-dashboard --no-pager` on the server shows whether it's running, and `journalctl -u life-dashboard -n 30` shows its recent output.
 
+## Alerts when the agent is down
+
+Nothing to set up. Every 10 minutes the server checks that the agent is running. If it's been down for two checks in a row, the server texts you through the same Telegram bot (messages start with ⚠️ Server), and texts again when it's back. You'll also get a text if a scheduled routine is skipped or a backup fails. The nightly restart takes seconds, so it never triggers an alert.
+
+To test it, on the server as root:
+
+```bash
+sudo -u agent /home/agent/life-agent/scripts/alert.sh "Test alert"
+```
+
+If no text arrives, `cat /home/agent/life-agent/log/alerts.log` says why.
+
+## Off-server backups (one time, about 15 minutes)
+
+The nightly backup keeps 30 days of copies on the server itself. If the server is ever lost, those go with it. This adds an encrypted copy somewhere else each night.
+
+How it works: each night the database and your `local/` files (settings, playbook, handoff note) are locked with a key and uploaded. The storage provider only ever sees scrambled data. The key that unlocks it lives in your password manager, not on the server, so a lost server doesn't take the key with it.
+
+These steps use Backblaze B2, because its free tier easily covers a database this size. Any storage rclone supports works the same way.
+
+**1. Run the update first** (it installs the two tools this uses), as root:
+
+```bash
+bash /home/agent/life-agent/scripts/update.sh
+```
+
+**2. Make the encryption key**, still as root:
+
+```bash
+age-keygen
+```
+
+It prints three lines. **Save all three in your password manager** as "Life agent backup key." The `AGE-SECRET-KEY-1…` line is what unlocks your backups; without it they can't be opened by anyone, including you. Copy the `age1…` public key from the second line for step 4. Nothing was saved on the server.
+
+**3. Create the storage**, at [backblaze.com](https://www.backblaze.com) (create a B2 account if you don't have one):
+
+- **Buckets → Create a Bucket.** Pick a unique name like `life-agent-backup-cs29`, and leave it **Private**.
+- **Application Keys → Add a New Application Key.** Name it `linode`, allow access to **only that bucket**, with Read and Write.
+- Copy the **keyID** and **applicationKey**. Backblaze shows the second one only once.
+
+**4. Connect the server**, as the agent user. Replace the four `CAPS` values:
+
+```bash
+su - agent
+rclone config create offsite b2 account=KEY_ID key=APPLICATION_KEY hard_delete=true
+printf 'OFFSITE_REMOTE=offsite:BUCKET_NAME\nAGE_RECIPIENT=AGE_PUBLIC_KEY\n' > ~/life-agent/local/offsite.env
+chmod 600 ~/life-agent/local/offsite.env
+~/life-agent/scripts/backup.sh && tail -2 ~/life-agent/log/backup.log
+exit
+```
+
+The last line should end with `off-server OK`. You'll also see the file in the bucket on Backblaze. From now on it runs every night at 3:15am.
+
+**To restore**, on any computer: download the newest `life-agent-….tar.gz.age` from the bucket, save the three key lines from your password manager as `key.txt`, then:
+
+```bash
+age -d -i key.txt life-agent-DATE.tar.gz.age | tar -xz
+```
+
+That gives you `backups/life-DATE.db` (copy it to `db/life.db` on the new server) and the `local/` folder. WHOOP credentials aren't in the backup on purpose; run `whoop.py auth` again on a new server.
+
 ## Updating
 
 Whenever there's a new version, on the server as root:
@@ -302,10 +363,13 @@ It shows what changed, backs up the database, pulls the update, applies database
 | Restart it | `systemctl restart life-agent` |
 | Change routine times | Edit `/etc/cron.d/life-agent` |
 | Check missed routines | `cat /home/agent/life-agent/log/routine-errors.log` |
+| Check backups | `tail /home/agent/life-agent/log/backup.log` |
+| See what alerts were sent | `cat /home/agent/life-agent/log/alerts.log` |
+| Read the agent's handoff note | `cat /home/agent/life-agent/local/handoff.md` |
 | Look at the raw data | `sudo -u agent sqlite3 /home/agent/life-agent/db/life.db` |
 | Change its personality or rules | Edit `CLAUDE.md`, then restart |
 
-**Why the nightly restart:** a conversation that runs for weeks fills up its context. Restarting at 3:30am gives it a clean slate each day. Nothing is lost, because everything lives in the database. Backups run at 3:15am, just before.
+**Why the nightly restart:** a conversation that runs for weeks fills up its context. Restarting at 3:30am gives it a clean slate each day. At 3:10am the agent writes a short handoff note (`local/handoff.md`) with anything from the day that isn't in the database, like a conversation left mid-thread, and reads it after the restart. Backups run at 3:15am, so the note is included.
 
 ---
 

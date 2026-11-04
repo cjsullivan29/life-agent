@@ -34,6 +34,12 @@ main() {
   fi
 
   chmod +x "$DEST"/scripts/*.sh "$DEST"/scripts/*.py
+  # Tools for encrypted off-server backups
+  if ! command -v age >/dev/null || ! command -v rclone >/dev/null; then
+    echo "   Installing backup tools (age, rclone)"
+    { apt-get update -qq && apt-get install -y -qq age rclone >/dev/null; } \
+      || echo "   Warning: couldn't install age/rclone. Off-server backups won't run until they're installed."
+  fi
   as_agent "./scripts/ensure-local.sh"
 
   echo "4/5 Updating the database"
