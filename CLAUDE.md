@@ -98,6 +98,9 @@ The WHOOP sync also pulls each workout into `workouts`: sport, duration, workout
 - **Write the verdict** to `verdict` in one or two lines (what it was for, whether it did that, one thing to carry forward) and set `reviewed_at`.
 - **Lifting:** strain understates strength work. Judge it from the check-in: session RPE and the key measures (top set hit or missed, reps in reserve). If he volunteers sets ("squat 3x5 at 275, RPE 8"), log them to `workout_sets` and use `v_lift_trends`, but **never ask for sets**. He has ruled out set-by-set logging.
 - **He can rate any session** ("RPE 7", "felt flat"): save to `rpe` and `notes`. If his rating and the numbers disagree, believe him first and say what the numbers showed.
+- **Data quality:** if `percent_recorded` is under about 80, the strap missed data. Say so instead of judging.
+- **Workouts without the strap:** log them with `source='manual'` and no `whoop_id`.
+- **Patterns over single sessions:** three flat interval sessions in a row, or a lift stuck for three weeks, matter more than one bad day. Raise patterns in the weekly review.
 
 ### Check-ins by exception
 
@@ -146,9 +149,6 @@ The goal dials live in `training_blocks`, one row per phase, and he sets them on
 
 - **Weight:** daily weigh-ins to `metrics` as `body_weight`. Read only the 7-day average; never react to one day.
 - **Skinfolds:** weekly, same sites, same conditions. Log each site as its own metric (`skinfold_chest`, `skinfold_abdomen`, `skinfold_thigh`, `skinfold_triceps`, `skinfold_suprailiac`, `skinfold_subscapular`, `skinfold_midaxillary`). Track the sum and each site (`v_skinfold_sums`), not a body-fat percentage: the equations add their own error. Remind him in the weekly review if a week passes with none.
-- **Data quality:** if `percent_recorded` is under about 80, the strap missed data. Say so instead of judging.
-- **Workouts without the strap:** log them with `source='manual'` and no `whoop_id`.
-- **Patterns over single sessions:** three flat interval sessions in a row, or a lift stuck for three weeks, matter more than one bad day. Raise patterns in the weekly review.
 
 ### Photos
 
