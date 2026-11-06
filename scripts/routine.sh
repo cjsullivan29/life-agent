@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Injects a scheduled routine into the running agent session.
-# Usage: routine.sh morning-brief | evening-checkin | meal-plan | weekly-review | handoff
+# Usage: routine.sh pre-session | session-checkin | morning-brief | evening-checkin | meal-plan | weekly-review | handoff
 # Called by cron (see system/life-agent.cron).
 SESSION="lifeagent"
 AGENT_DIR="${AGENT_DIR:-$HOME/life-agent}"

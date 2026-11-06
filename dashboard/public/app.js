@@ -4,7 +4,7 @@ const $view = document.getElementById("view");
 const $tip = document.getElementById("tooltip");
 const $toast = document.getElementById("toast");
 const $together = document.getElementById("together");
-const TABS = ["today", "health", "life", "food", "loops"];
+const TABS = ["today", "health", "goals", "life", "food", "loops"];
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
@@ -14,6 +14,7 @@ const state = {
   together: store.get("together", false),
   days: store.get("healthDays", 30),
   domain: null,
+  newBlock: false,
 };
 $together.checked = state.together;
 
@@ -183,13 +184,16 @@ function dataTable(points, unit, decimals) {
     h("tbody", {}, [...points].reverse().map((p) => h("tr", {}, h("td", {}, fmtDate(p.date)), h("td", { class: "num" }, fmtNum(p.value, decimals)))))));
 }
 
-function chartCard({ title, points, unit, decimals = 0, kind, target, targetLabel, colorFor, note, betterUp = true, extra }) {
+function chartCard({ title, points, unit, decimals = 0, kind, target, targetLabel, colorFor, note, betterUp = true, extra, weekly = false }) {
   const last = points.at(-1);
   const recent = points.slice(-7).map((p) => p.value), prior = points.slice(-14, -7).map((p) => p.value);
   const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
   const a7 = avg(recent), p7 = avg(prior);
   let delta = null;
-  if (a7 != null && p7 != null && prior.length >= 3) {
+  if (weekly) {
+    const prev = points.at(-2);
+    delta = prev ? `${last.value - prev.value >= 0 ? "+" : "−"}${fmtNum(Math.abs(last.value - prev.value), decimals)} vs previous` : null;
+  } else if (a7 != null && p7 != null && prior.length >= 3) {
     const d = a7 - p7;
     delta = `7-day avg ${fmtNum(a7, decimals)} (${d >= 0 ? "+" : "−"}${fmtNum(Math.abs(d), decimals)} vs prior week)`;
   } else if (a7 != null) delta = `7-day avg ${fmtNum(a7, decimals)}`;
@@ -521,9 +525,215 @@ async function renderLoops() {
   return out;
 }
 
+// ------------------------------------------------------------------ goals: the dials
+
+const PHASE_LABELS = { cut: "Cut", build: "Build", hyrox_block: "HYROX block", taper: "Taper", maintenance: "Maintenance", other: "Other" };
+const LEVEL_CLASS = { critical: "bad", warning: "warn", info: "" };
+
+function blockDefaults(today) {
+  return { name: "Cut", phase: "cut", start_date: today, end_date: "", priority: 20, direction: "lose", rate_pct: 0.5,
+    emphasis: 50, recovery_strictness: "balanced", sessions_per_week: 5, maintenance_kcal: "", calorie_floor: 1800, notes: "" };
+}
+
+function dialSlider({ label, left, right, value, min, max, step, fmt, oninput }) {
+  const out = h("span", { class: "dial-val" }, fmt(value));
+  const input = h("input", { type: "range", min, max, step, value, "aria-label": label,
+    oninput: (e) => { out.textContent = fmt(Number(e.target.value)); oninput(Number(e.target.value)); } });
+  return h("div", { class: "dial" },
+    h("div", { class: "dial-head" }, h("span", {}, label), out),
+    input,
+    left || right ? h("div", { class: "dial-ends" }, h("span", {}, left), h("span", {}, right)) : null);
+}
+
+function segPick(label, options, value, onpick) {
+  const wrap = h("div", { class: "seg", role: "group", "aria-label": label });
+  const draw = (v) => wrap.replaceChildren(...options.map(([text, val]) =>
+    h("button", { type: "button", "aria-pressed": String(v === val), onclick: () => { draw(val); onpick(val); } }, text)));
+  draw(value);
+  return h("div", { class: "dial" }, h("div", { class: "dial-head" }, h("span", {}, label)), wrap);
+}
+
+function skeletonView(sk, conflicts) {
+  if (!sk) return empty("Set the dials to see the numbers.");
+  const k = (v) => (v == null ? "–" : fmtNum(v));
+  return h("div", {},
+    h("div", { class: "stats", style: "margin-top:0" },
+      h("div", { class: "stat" }, h("div", { class: "label" }, "Hard day"), h("div", { class: "value" }, k(sk.hard_kcal), h("span", { class: "muted small" }, " kcal")),
+        h("div", { class: "delta" }, sk.hard_carbs_g != null ? `${k(sk.hard_carbs_g)}g carbs` : "")),
+      h("div", { class: "stat" }, h("div", { class: "label" }, "Rest day"), h("div", { class: "value" }, k(sk.rest_kcal), h("span", { class: "muted small" }, " kcal")),
+        h("div", { class: "delta" }, sk.rest_carbs_g != null ? `${k(sk.rest_carbs_g)}g carbs` : "")),
+      h("div", { class: "stat" }, h("div", { class: "label" }, "Protein"), h("div", { class: "value" }, k(sk.protein_g), h("span", { class: "muted small" }, " g")),
+        h("div", { class: "delta" }, sk.fat_g != null ? `fat ${k(sk.fat_g)}g` : ""))),
+    h("dl", { class: "kv", style: "margin-top:12px" },
+      h("dt", {}, "Weekly mix"), h("dd", {}, `${sk.strength_sessions} strength / ${sk.sessions_per_week - sk.strength_sessions} conditioning`),
+      h("dt", {}, "Maintenance"), h("dd", {}, sk.maintenance_used == null ? "not set" : `${k(sk.maintenance_used)} kcal (${sk.maintenance_source})`),
+      h("dt", {}, "Daily change"), h("dd", {}, sk.daily_delta == null ? "–" : `${sk.daily_delta > 0 ? "+" : ""}${k(sk.daily_delta)} kcal vs maintenance`),
+      h("dt", {}, "Weight (7-day)"), h("dd", {}, sk.weight_avg7 == null ? "no weigh-ins this week" : `${fmtNum(sk.weight_avg7, 1)} lb`)),
+    conflictList(conflicts));
+}
+
+function conflictList(conflicts) {
+  if (!conflicts?.length) return h("p", { class: "small", style: "margin:12px 0 0;color:var(--good-text)" }, "No conflicts. These settings point the same direction.");
+  return h("ul", { class: "list", style: "margin-top:12px" }, conflicts.map((c) =>
+    h("li", {}, c.level !== "info" ? h("span", { class: `pill ${LEVEL_CLASS[c.level]}` }, c.level === "critical" ? "check" : "tradeoff") : h("span", { class: "pill" }, "note"),
+      h("div", { class: "grow small" }, c.message))));
+}
+
+function blockEditor(start, { isNew, today, onSaved }) {
+  const v = { ...start };
+  for (const k of ["end_date", "maintenance_kcal", "notes"]) if (v[k] == null) v[k] = "";
+  const preview = h("div", {});
+  const summary = h("p", { class: "small", style: "margin:4px 0 0" });
+  let timer = null;
+  const refresh = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        const r = await fetch("/api/blocks/preview", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...v, id: isNew ? null : v.id }) });
+        const d = await r.json();
+        preview.replaceChildren(r.ok ? skeletonView(d.skeleton, d.conflicts) : empty(d.error || "Couldn't preview"));
+        const sk = r.ok ? d.skeleton : null;
+        summary.textContent = sk && sk.hard_kcal != null
+          ? `Hard ${fmtNum(sk.hard_kcal)} · rest ${fmtNum(sk.rest_kcal)} kcal · ${fmtNum(sk.protein_g)}g protein${d.conflicts.some((c) => c.level !== "info") ? " · see tradeoffs" : ""}`
+          : "";
+      } catch { preview.replaceChildren(empty("Couldn't preview")); }
+    }, 250);
+  };
+  const set = (k) => (val) => { v[k] = val; refresh(); };
+  const field = (label, input) => h("label", { class: "field-row" }, h("span", {}, label), input);
+  const text = (k, attrs = {}) => h("input", { class: "field", value: v[k] ?? "", ...attrs, oninput: (e) => set(k)(e.target.value) });
+
+  let rate = null;
+  const rateWrap = h("div", {});
+  const drawRate = () => {
+    rate = v.direction === "maintain" ? null : dialSlider({ label: "Rate", left: "slower", right: "faster",
+      value: v.direction === "gain" ? Math.min(v.rate_pct || 0.25, 0.5) : (v.rate_pct || 0.5), min: 0.1, max: v.direction === "gain" ? 0.5 : 1, step: 0.05,
+      fmt: (x) => `${x.toFixed(2)}% of body weight / week`, oninput: set("rate_pct") });
+    if (v.direction === "gain" && v.rate_pct > 0.5) v.rate_pct = 0.5;
+    if (v.direction !== "maintain" && !v.rate_pct) v.rate_pct = v.direction === "gain" ? 0.25 : 0.5;
+    rateWrap.replaceChildren(rate || h("p", { class: "muted small", style: "margin:0" }, "Maintaining: no planned weight change."));
+  };
+  drawRate();
+
+  const form = h("div", { class: "dials" },
+    h("div", { class: "field-grid" },
+      field("Name", text("name", { placeholder: "Cut, part 2" })),
+      field("Phase", h("select", { class: "field", onchange: (e) => set("phase")(e.target.value) },
+        Object.entries(PHASE_LABELS).map(([val, lab]) => h("option", { value: val, selected: v.phase === val }, lab)))),
+      field("Starts", text("start_date", { type: "date" })),
+      field("Ends", text("end_date", { type: "date" }))),
+    dialSlider({ label: "Priority", left: "Body composition", right: "Performance", value: v.priority, min: 0, max: 100, step: 5,
+      fmt: (x) => (x < 40 ? "body comp-led" : x > 60 ? "performance-led" : "balanced") + ` (${x})`, oninput: set("priority") }),
+    segPick("Direction", [["Lose fat", "lose"], ["Maintain", "maintain"], ["Gain muscle", "gain"]], v.direction,
+      (val) => { v.direction = val; drawRate(); refresh(); }),
+    rateWrap,
+    dialSlider({ label: "Training emphasis", left: "Strength", right: "Engine", value: v.emphasis, min: 0, max: 100, step: 5,
+      fmt: (x) => (x < 40 ? "strength" : x > 60 ? "engine" : "hybrid") + ` (${x})`, oninput: set("emphasis") }),
+    segPick("Recovery strictness", [["Conservative", "conservative"], ["Balanced", "balanced"], ["Aggressive", "aggressive"]], v.recovery_strictness, set("recovery_strictness")),
+    h("div", { class: "field-grid" },
+      field("Sessions per week", text("sessions_per_week", { type: "number", min: 1, max: 7, inputmode: "numeric" })),
+      field("Maintenance guess (kcal)", text("maintenance_kcal", { type: "number", min: 1000, max: 6000, step: 50, inputmode: "numeric", placeholder: "e.g. 2800" })),
+      field("Calorie floor (kcal)", text("calorie_floor", { type: "number", min: 1200, max: 4000, step: 50, inputmode: "numeric" }))),
+    h("p", { class: "muted small", style: "margin:4px 0 0" }, "The maintenance guess is replaced by a learned estimate once there are 2–3 weeks of logged meals and weigh-ins."),
+    summary,
+    h("div", { style: "display:flex;gap:8px;margin-top:12px;flex-wrap:wrap" },
+      h("button", { class: "btn", type: "button", onclick: async () => {
+        const r = await post(isNew ? "/api/blocks" : `/api/blocks/${v.id}`, v);
+        toast(isNew ? "Block started" : "Dials saved"); onSaved?.(r.id); } }, isNew ? "Start this block" : "Save dials")));
+  refresh();
+  return { form, preview };
+}
+
+async function renderGoals() {
+  if (state.together) return [h("div", { class: "view-head" }, h("h1", {}, "Goals")), h("div", { class: "banner" }, "Goals are private in Together mode.")];
+  const d = await api("/api/goals");
+  const out = [h("div", { class: "view-head" }, h("h1", {}, "Goals"), h("span", { class: "sub" }, "The dials the agent works inside"))];
+  if (d.missing) return [...out, card("Not installed yet", null, empty("Run update.sh on the server to add training blocks."))];
+
+  const editingNew = state.newBlock || !d.active;
+  const base = editingNew ? blockDefaults(d.today) : d.active;
+  const ed = blockEditor(base, { isNew: editingNew, today: d.today, onSaved: () => { state.newBlock = false; route(); } });
+  const head = editingNew
+    ? (d.active ? "New block" : "Set up your first block")
+    : `${d.active.name} · ${PHASE_LABELS[d.active.phase] || d.active.phase}`;
+  const aside = editingNew ? (d.active ? "saving ends the current block" : null)
+    : `since ${fmtShort(d.active.start_date)}${d.active.end_date ? ` · until ${fmtShort(d.active.end_date)}` : ""}`;
+
+  const top = h("div", { class: "grid cols-2" });
+  top.append(card(head, aside, ed.form,
+    !editingNew ? h("button", { class: "btn ghost small", type: "button", style: "margin-top:10px", onclick: () => { state.newBlock = true; route(); } }, "Start a new block")
+      : d.active ? h("button", { class: "btn ghost small", type: "button", style: "margin-top:10px", onclick: () => { state.newBlock = false; route(); } }, "Cancel") : null));
+  top.append(card("What the dials produce", "updates as you move them", ed.preview));
+  out.push(top);
+
+  const grid = h("div", { class: "grid cols-3", style: "margin-top:12px" });
+  const day = d.day;
+  grid.append(card("Today", day ? (day.day_type ? `${day.day_type} day` : null) : null,
+    day ? [h("div", { class: "stats", style: "margin-top:0" },
+      h("div", { class: "stat" }, h("div", { class: "label" }, "Calories"), h("div", { class: "value" }, fmtNum(day.kcal))),
+      h("div", { class: "stat" }, h("div", { class: "label" }, "Protein"), h("div", { class: "value" }, fmtNum(day.protein_g), h("span", { class: "muted small" }, " g"))),
+      h("div", { class: "stat" }, h("div", { class: "label" }, "Carbs"), h("div", { class: "value" }, fmtNum(day.carbs_g), h("span", { class: "muted small" }, " g")))),
+      h("dl", { class: "kv", style: "margin-top:12px" },
+        h("dt", {}, "Recovery"), h("dd", {}, day.recovery == null ? "not scored" : `${fmtNum(day.recovery)}%`),
+        h("dt", {}, "Gate"), h("dd", {}, (day.gate || "–").replace("_", " ")),
+        day.session_change ? [h("dt", {}, "Session"), h("dd", {}, day.session_change)] : null)]
+      : empty("Set by the pre-session message once WHOOP scores your recovery.")));
+
+  const m = d.maintenance || {};
+  grid.append(card("Learned maintenance", m.ready ? "ready" : "building",
+    m.ready ? [h("div", { class: "hero" }, h("div", {}, h("span", { class: "big", style: "font-size:36px" }, fmtNum(m.estimate_kcal)), h("span", { class: "unit" }, " kcal"))),
+      h("dl", { class: "kv", style: "margin-top:12px" },
+        h("dt", {}, "Avg intake"), h("dd", {}, `${fmtNum(m.avg_intake)} kcal over ${m.intake_days} logged days`),
+        h("dt", {}, "Weight trend"), h("dd", {}, `${fmtNum(m.weight_early, 1)} → ${fmtNum(m.weight_late, 1)} lb (${m.lb_per_week > 0 ? "+" : ""}${fmtNum(m.lb_per_week, 2)}/wk)`)),
+      h("p", { class: "muted small", style: "margin:8px 0 0" }, "Under-logging makes this read low.")]
+      : empty(`Needs 14 logged days in the last 3 weeks and weigh-ins at both ends. ${m.intake_days || 0} logged days so far.`)));
+
+  grid.append(card("This week's plan", d.planned.length ? plural(d.planned.length, "session") : null,
+    d.planned.length ? h("ul", { class: "list" }, d.planned.map((p) => {
+      let km = [];
+      try { km = JSON.parse(p.key_measures || "[]"); } catch {}
+      return h("li", {}, h("div", { class: "grow" },
+        h("div", {}, p.title, p.key_session ? h("span", { class: "pill", style: "margin-left:6px" }, "key") : null),
+        h("div", { class: "meta" }, [fmtDate(p.plan_date), p.session_type, p.source !== "agent" ? p.source : null, p.status !== "planned" ? p.status : null].filter(Boolean).join(" · ")),
+        km.length ? h("div", { class: "small muted", style: "margin-top:2px" }, "Ask: ", km.map((x) => x.measure).join(", ")) : null));
+    })) : empty("No sessions planned for the next 7 days.")));
+  out.push(grid);
+
+  const g2 = h("div", { class: "grid cols-2", style: "margin-top:12px" });
+  g2.append(card("Sessions", "check-ins and load",
+    d.sessions.length ? h("div", { class: "table-wrap" }, h("table", {},
+      h("thead", {}, h("tr", {}, h("th", {}, "Session"), h("th", {}, "Check-in"), h("th", { class: "num" }, "RPE"), h("th", { class: "num" }, "Load"), h("th", { class: "num" }, "Strain"))),
+      h("tbody", {}, d.sessions.map((w) => h("tr", {},
+        h("td", {}, h("div", {}, w.planned_title || w.session_type || w.sport || "Workout"), h("div", { class: "muted small" }, fmtDate(w.workout_date))),
+        h("td", {}, w.checkin_status ? w.checkin_status.replace("_", " ") : h("span", { class: "muted" }, "–")),
+        h("td", { class: "num" }, fmtNum(w.rpe)), h("td", { class: "num" }, fmtNum(w.srpe_load)), h("td", { class: "num" }, fmtNum(w.strain, 1)))))))
+      : empty("Workouts from WHOOP show here with their check-ins."),
+    h("p", { class: "muted small", style: "margin:8px 0 0" }, "Load = session RPE × minutes. When it disagrees with strain, that's a readiness signal.")));
+  g2.append(card("Key measures", "actual vs. target",
+    d.measures.length ? h("div", { class: "table-wrap" }, h("table", {},
+      h("thead", {}, h("tr", {}, h("th", {}, "Measure"), h("th", { class: "num" }, "Target"), h("th", { class: "num" }, "Actual"))),
+      h("tbody", {}, d.measures.map((x) => h("tr", {},
+        h("td", {}, h("div", {}, x.measure), h("div", { class: "muted small" }, `${fmtDate(x.measure_date)}${x.unit ? ` · ${x.unit}` : ""}`)),
+        h("td", { class: "num" }, fmtNum(x.target, 1)), h("td", { class: "num" }, fmtNum(x.actual, 1)))))))
+      : empty("Filled from post-workout check-ins.")));
+  out.push(g2);
+
+  const charts = h("div", { class: "charts", style: "margin-top:12px" },
+    chartCard({ title: "Body weight", points: d.weight, unit: "lb", decimals: 1, note: "Daily weigh-ins; read the 7-day average, not single days." }),
+    chartCard({ title: "Skinfold sum", points: d.skinfolds, unit: "mm", decimals: 1, weekly: true,
+      note: d.skinfolds.length ? `Latest: ${d.skinfolds.at(-1).detail}. Same sites, same conditions, weekly.` : "Log weekly caliper readings by site; the sum is the trend." }));
+  out.push(charts);
+
+  out.push(h("div", { style: "height:12px" }), card("Rules changelog", "one change at a time",
+    h("ul", { class: "list" }, d.rules.map((r) => h("li", {}, h("span", { class: "pill" }, `v${r.version}`),
+      h("div", { class: "grow" }, h("div", { class: "small" }, r.change), h("div", { class: "meta" }, `${fmtDate(r.effective_date)}${r.reason ? ` · ${r.reason}` : ""}`)))))));
+  return out;
+}
+
 // ------------------------------------------------------------------ router
 
-const VIEWS = { today: renderToday, health: renderHealth, life: renderLife, food: renderFood, loops: renderLoops };
+const VIEWS = { today: renderToday, health: renderHealth, goals: renderGoals, life: renderLife, food: renderFood, loops: renderLoops };
 
 async function route() {
   const tab = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "today";

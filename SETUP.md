@@ -20,7 +20,8 @@ Your agent is Claude Code running 24/7 on a small cloud server. You reach it thr
 | `scripts/routine.sh` | Sends the agent a scheduled task (morning brief, evening check-in, meal plan, weekly review). |
 | `scripts/backup.sh` | Nightly database backup, keeps 30 days. |
 | `system/life-agent.service` | Keeps the agent running and restarts it if it crashes. |
-| `system/life-agent.cron` | The schedule: 6:45am weekday brief, 8:30pm check-in, Saturday 9am meal plan, Sunday 7pm review, nightly backup and restart. |
+| `system/life-agent.cron` | The schedule: a pre-session message as soon as WHOOP scores recovery (4:00–6:55am), 6:40am post-workout check-in, 6:45am weekday brief, 8:30pm check-in, Saturday 9am meal plan, Sunday 7pm review, nightly backup and restart. |
+| `scripts/presession-watch.sh` | Waits for this morning's recovery, then sends the pre-session routine once. |
 
 ## What you need
 

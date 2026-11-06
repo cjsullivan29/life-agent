@@ -61,6 +61,21 @@ function domainVisible(name: string, together: boolean): boolean {
   return !!r?.shared_view;
 }
 
+function tableExists(name: string): boolean {
+  return !!one("SELECT 1 AS x FROM sqlite_master WHERE name = ?", name);
+}
+
+// Today's target: what the agent set this morning, else the active block's rest-day numbers, else the old fixed goal.
+function targetFor(key: "protein_g" | "calories_in", date: string): number | null {
+  if (tableExists("daily_targets")) {
+    const d = one("SELECT kcal, protein_g FROM daily_targets WHERE target_date = ?", date);
+    if (d) return key === "protein_g" ? d.protein_g : d.kcal;
+    const sk = one("SELECT rest_kcal, protein_g FROM v_block_skeleton");
+    if (sk && (key === "protein_g" ? sk.protein_g : sk.rest_kcal) != null) return key === "protein_g" ? sk.protein_g : sk.rest_kcal;
+  }
+  return one(`SELECT target_value AS v FROM goals WHERE metric_key = ? AND status='active' AND target_value IS NOT NULL`, key)?.v ?? null;
+}
+
 function band(recovery: number | null) {
   if (recovery == null) return null;
   if (recovery >= 67) return { level: "high", advice: "Good day to push." };
@@ -93,8 +108,9 @@ function today(together: boolean) {
       strain_yesterday: one("SELECT value FROM v_daily_metrics WHERE metric_key='whoop_strain' AND measured_on = date(?, '-1 day')", t)?.value ?? null,
       protein_today: one("SELECT total FROM v_today_nutrition WHERE metric_key='protein_g'")?.total ?? 0,
       calories_today: one("SELECT total FROM v_today_nutrition WHERE metric_key='calories_in'")?.total ?? 0,
-      protein_target: one("SELECT target_value AS v FROM goals WHERE metric_key='protein_g' AND status='active' AND target_value IS NOT NULL")?.v ?? null,
-      calories_target: one("SELECT target_value AS v FROM goals WHERE metric_key='calories_in' AND status='active' AND target_value IS NOT NULL")?.v ?? null,
+      protein_target: targetFor("protein_g", t),
+      calories_target: targetFor("calories_in", t),
+      day_targets: tableExists("daily_targets") ? one("SELECT * FROM daily_targets WHERE target_date = ?", t) : null,
       experiment: one("SELECT * FROM v_experiments_active LIMIT 1"),
     };
   }
@@ -209,8 +225,8 @@ function food() {
       `SELECT id, item, quantity, category, checked FROM grocery_items
        WHERE checked = 0 OR week_start >= date(?, '-7 days')
        ORDER BY checked, category, item`, ws),
-    protein_target: one("SELECT target_value AS v FROM goals WHERE metric_key='protein_g' AND status='active' AND target_value IS NOT NULL")?.v ?? null,
-    calories_target: one("SELECT target_value AS v FROM goals WHERE metric_key='calories_in' AND status='active' AND target_value IS NOT NULL")?.v ?? null,
+    protein_target: targetFor("protein_g", t),
+    calories_target: targetFor("calories_in", t),
   };
 }
 
@@ -228,6 +244,102 @@ function loops() {
     changes: all("SELECT * FROM agent_changes ORDER BY proposed_at DESC LIMIT 20"),
     feedback: all("SELECT * FROM agent_feedback ORDER BY occurred_at DESC LIMIT 10"),
   };
+}
+
+// ------------------------------------------------------------------ goals: training blocks and the dials
+
+function goals() {
+  if (!tableExists("training_blocks")) return { missing: true };
+  const t = localToday();
+  return {
+    today: t,
+    active: one("SELECT * FROM v_active_block"),
+    blocks: all("SELECT * FROM training_blocks ORDER BY start_date DESC LIMIT 12"),
+    skeleton: one("SELECT * FROM v_block_skeleton"),
+    conflicts: all("SELECT * FROM v_block_conflicts"),
+    maintenance: one("SELECT * FROM v_maintenance_estimate"),
+    day: one("SELECT * FROM daily_targets WHERE target_date = ?", t),
+    recent_days: all("SELECT * FROM daily_targets WHERE target_date > date(?, '-14 days') ORDER BY target_date DESC", t),
+    sessions: all("SELECT * FROM v_session_load LIMIT 14"),
+    measures: all(
+      `SELECT measure_date, measure, target, actual, unit, note FROM session_measures
+       WHERE measure_date > date(?, '-56 days') ORDER BY measure_date DESC, id DESC LIMIT 40`, t),
+    planned: all(
+      `SELECT id, plan_date, title, intent, session_type, key_session, status, source, key_measures FROM planned_sessions
+       WHERE plan_date >= ? AND plan_date < date(?, '+7 days') ORDER BY plan_date, id`, t, t),
+    weight: all(
+      `SELECT measured_on AS date, ROUND(value, 1) AS value FROM v_daily_metrics
+       WHERE metric_key = 'body_weight' AND measured_on > date(?, '-60 days') ORDER BY measured_on`, t),
+    skinfolds: all("SELECT measured_on AS date, sum_mm AS value, sites, detail FROM v_skinfold_sums ORDER BY measured_on DESC LIMIT 26").reverse(),
+    rules: all("SELECT * FROM rules_versions ORDER BY effective_date DESC, version DESC"),
+  };
+}
+
+const PHASES = ["cut", "build", "hyrox_block", "taper", "maintenance", "other"];
+const isDate = (v: any) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const num = (v: any, lo: number, hi: number) => {
+  const n = Number(v);
+  return v === "" || v == null || !Number.isFinite(n) ? null : Math.min(hi, Math.max(lo, n));
+};
+
+// Returns the cleaned dial values, or an error string.
+function cleanBlock(b: any): Record<string, any> | string {
+  const out: Record<string, any> = {
+    name: String(b.name || "").trim().slice(0, 80),
+    phase: PHASES.includes(b.phase) ? b.phase : "other",
+    start_date: isDate(b.start_date) ? b.start_date : localToday(),
+    end_date: isDate(b.end_date) ? b.end_date : null,
+    priority: num(b.priority, 0, 100) ?? 20,
+    direction: ["lose", "maintain", "gain"].includes(b.direction) ? b.direction : "maintain",
+    rate_pct: num(b.rate_pct, 0, 1) ?? 0,
+    emphasis: num(b.emphasis, 0, 100) ?? 50,
+    recovery_strictness: ["conservative", "balanced", "aggressive"].includes(b.recovery_strictness) ? b.recovery_strictness : "balanced",
+    sessions_per_week: Math.round(num(b.sessions_per_week, 1, 7) ?? 5),
+    maintenance_kcal: num(b.maintenance_kcal, 1000, 6000),
+    calorie_floor: num(b.calorie_floor, 1200, 4000) ?? 1800,
+    notes: b.notes ? String(b.notes).slice(0, 500) : null,
+  };
+  if (!out.name) return "Give the block a name.";
+  if (out.direction === "maintain") out.rate_pct = 0;
+  if (out.direction === "gain" && out.rate_pct > 0.5) out.rate_pct = 0.5;
+  if (out.end_date && out.end_date < out.start_date) return "End date is before the start date.";
+  return out;
+}
+
+const DIAL_COLS = ["name", "phase", "start_date", "end_date", "priority", "direction", "rate_pct", "emphasis",
+  "recovery_strictness", "sessions_per_week", "maintenance_kcal", "calorie_floor", "notes"];
+
+// Writes a block. A new active block ends the one before it (the day before it starts).
+function saveBlock(id: number | null, v: Record<string, any>) {
+  if (id) {
+    const r = run(`UPDATE training_blocks SET ${DIAL_COLS.map((c) => `${c} = ?`).join(", ")}, updated_at = datetime('now','localtime') WHERE id = ?`,
+      ...DIAL_COLS.map((c) => v[c]), id);
+    if (!r.changes) throw new Error("No block with that id.");
+    return id;
+  }
+  if (v.start_date <= localToday()) {
+    // The current block ends the day before the new one starts (or on the same day, if both start today).
+    run(`UPDATE training_blocks SET status = 'done',
+           end_date = CASE WHEN end_date IS NULL OR end_date >= ? THEN MAX(start_date, date(?, '-1 day')) ELSE end_date END,
+           updated_at = datetime('now','localtime')
+         WHERE status = 'active' AND start_date <= ?`, v.start_date, v.start_date, v.start_date);
+  }
+  const r = run(`INSERT INTO training_blocks (${DIAL_COLS.join(", ")}, status) VALUES (${DIAL_COLS.map(() => "?").join(", ")}, ?)`,
+    ...DIAL_COLS.map((c) => v[c]), v.start_date > localToday() ? "planned" : "active");
+  return Number(r.lastInsertRowid);
+}
+
+// What the dials would produce, computed by the same views the agent reads, then rolled back.
+function previewBlock(id: number | null, v: Record<string, any>) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const previewStart = v.start_date > localToday() ? localToday() : v.start_date; // preview as if it were active today
+    saveBlock(id, { ...v, start_date: previewStart, end_date: null });
+    if (id) run("UPDATE training_blocks SET status = 'active' WHERE id = ?", id);
+    return { skeleton: one("SELECT * FROM v_block_skeleton"), conflicts: all("SELECT * FROM v_block_conflicts") };
+  } finally {
+    db.exec("ROLLBACK");
+  }
 }
 
 // ------------------------------------------------------------------ writes (whitelisted)
@@ -290,6 +402,14 @@ async function write(path: string, req: Request): Promise<Response> {
     run("UPDATE meal_plan SET status = ? WHERE id = ?", b.status, Number(m[1]));
     return json({ ok: true });
   }
+  if (path === "/api/blocks/preview" || path === "/api/blocks" || (m = path.match(/^\/api\/blocks\/(\d+)$/))) {
+    if (!tableExists("training_blocks")) return bad("Run update.sh first: the training blocks table isn't installed yet.", 409);
+    const v = cleanBlock(b);
+    if (typeof v === "string") return bad(v);
+    const id = m ? Number(m[1]) : b.id ? Number(b.id) : null;
+    if (path === "/api/blocks/preview") return json(previewBlock(id, v));
+    return json({ ok: true, id: saveBlock(m ? id : null, v) });
+  }
   if ((m = path.match(/^\/api\/domains\/(\d+)$/))) {
     run("UPDATE domains SET shared_view = ? WHERE id = ?", b.shared_view ? 1 : 0, Number(m[1]));
     return json({ ok: true });
@@ -335,6 +455,7 @@ Bun.serve({
       if (p === "/api/life") return json(life(together));
       if (p === "/api/food") return json(food());
       if (p === "/api/loops") return json(loops());
+      if (p === "/api/goals") return json(goals());
       if (p.startsWith("/api/")) return bad("Not found", 404);
       return serveStatic(p);
     } catch (e: any) {

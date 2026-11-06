@@ -75,7 +75,7 @@ button, input, select { font: inherit; color: inherit; }
 
 .bottom-tabs {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
   background: color-mix(in srgb, var(--page) 92%, transparent);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
@@ -215,3 +215,13 @@ details.more summary { cursor: pointer; color: var(--ink-2); font-size: 14px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }
 .loading { opacity: .55; transition: opacity .2s; }
+
+/* ---------- goals: dials ---------- */
+.dials { display: grid; gap: 14px; }
+.dial-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
+.dial-val { color: var(--ink); font-weight: 600; font-size: 13px; text-align: right; }
+.dial-ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.dial input[type="range"] { width: 100%; accent-color: var(--accent); height: 28px; margin: 0; }
+.field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.field-row { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.field-row .field { width: 100%; color: var(--ink); }

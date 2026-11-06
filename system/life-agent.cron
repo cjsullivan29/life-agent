@@ -6,6 +6,13 @@
 0 10 * * *    agent  AGENT_DIR=/home/agent/life-agent python3 /home/agent/life-agent/scripts/whoop.py sync >/dev/null 2>>/home/agent/life-agent/log/whoop-errors.log
 0 20 * * *    agent  AGENT_DIR=/home/agent/life-agent python3 /home/agent/life-agent/scripts/whoop.py sync >/dev/null 2>>/home/agent/life-agent/log/whoop-errors.log
 
+# Pre-session: every 5 minutes from 4:00 to 6:55am, waits for WHOOP to score recovery (it does when he ends sleep),
+# then sends today's session and targets once, before he trains. See scripts/presession-watch.sh.
+*/5 4-6 * * * agent  AGENT_DIR=/home/agent/life-agent /home/agent/life-agent/scripts/presession-watch.sh
+
+# Post-workout check-in, daily 6:40am (after the 6:25 sync picks up the morning session). Silent if nothing to ask.
+40 6 * * *    agent  /home/agent/life-agent/scripts/routine.sh session-checkin
+
 # Morning brief, weekdays 6:45am (after training)
 45 6 * * 1-5  agent  /home/agent/life-agent/scripts/routine.sh morning-brief
 

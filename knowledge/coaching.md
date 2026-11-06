@@ -46,7 +46,8 @@ The current goal profile decides how I weigh everything else.
 - **Primary goals:** performance, body composition, general wellness. Usually blended, e.g. body comp 80 / performance 20.
 - **Direction for body comp:** lose fat, gain muscle, maintain (recomposition).
 - **Event override:** when he's training for an event, performance rises as the date approaches. In the final 1–2 weeks, body comp drops to near zero: no deficit, fuel and sleep take priority.
-- **Phases come from his training plan.** Each phase carries its own blend and targets, and I shift when the phase does, without him telling me. **[CHRISTIAN TO CONFIRM: phase blends below are placeholders until I have his program tracker.]**
+- **Phases come from his training plan.** Each phase carries its own blend and targets, and I shift when the phase does, without him telling me.
+- **The dials are the source of truth.** Since Nov 2026 each phase is a row in `training_blocks`, set by him on the dashboard. `priority` (0 body comp, 100 performance) is the blend; `direction`, `rate_pct`, `emphasis` and `recovery_strictness` do the rest, and `v_block_skeleton` turns them into numbers. The table below is the starting guide for setting those dials, not a second set of rules.
 
 | Phase | Blend (body comp / performance / wellness) | Calories | What wins a tie |
 |---|---|---|---|
@@ -169,6 +170,8 @@ Mood, soreness, motivation, and perceived sleep quality track training stress as
 
 ### Readiness decisions
 
+The block's `recovery_strictness` decides how hard these gates bite (CLAUDE.md, "Training blocks and daily targets"). The table is the balanced version.
+
 | Signal | Planned easy day | Planned hard / key session |
 |---|---|---|
 | Green recovery, feels good | As planned | As planned; a good day to push if it fits the plan |
@@ -208,7 +211,8 @@ Give the verdict in one or two lines: what the session was for, whether it did t
 ## 9. Body composition: measuring progress honestly
 
 - **Scale weight is a trend, never a verdict.** Use a 7-day rolling average. Water, glycogen, sodium, and digestion swing a single day by several pounds.
-- Pair weight with **waist measurement, progress photos, and strength in his main lifts**. In a cut, holding strength while the trend goes down means it's working.
+- He weighs in daily and takes skinfolds weekly. Pair the weight trend with the **skinfold sum and individual sites**, and strength in his main lifts. In a cut, holding strength while the trend goes down means it's working.
+- Track the skinfold sum in mm, not a body-fat percentage: the conversion equations add their own error. Same sites, same side, same time of day, ideally the same person measuring.
 - Body fat estimates (smart scales, BIA, even DEXA) have real error; use the same method, same conditions, and watch the trend.
 - **Plateaus:** give it 2–3 weeks of the trend before changing anything. Then check adherence and logging accuracy first, calories second, activity third.
 - **Adaptive thermogenesis** is real but modest; "metabolic damage" is overstated. The bigger drift in a long cut is usually less non-exercise activity and looser logging.
@@ -256,7 +260,7 @@ Correct these without lecturing, and only when they come up or affect a decision
 **[CHRISTIAN TO CONFIRM]** each of these, then delete this section:
 
 1. Phase blends and dates (section 3): I'll fill these from the program tracker.
-2. Current body weight and the goal (weight, body fat, or a look) for the cut. Waist measurement as a second marker?
+2. The goal for the cut (weight, skinfold sum, or a look). Weighing is daily and skinfolds weekly; which skinfold sites?
 3. Calorie floor (section 12).
 4. How hard should I push on adherence: just report, or nudge?
 5. Anything in here he disagrees with as a coach.
