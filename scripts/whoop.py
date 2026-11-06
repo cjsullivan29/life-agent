@@ -225,7 +225,8 @@ def fetch_all(path, start, end):
 # ---------------------------------------------------------------- transform
 
 def recovery_rows(records, sleep_end_by_id):
-    rows = []
+    """Rows for each scored recovery, plus a map of cycle id -> the day that cycle belongs to."""
+    rows, day_by_cycle = [], {}
     for r in records:
         if r.get("score_state") != "SCORED" or not r.get("score"):
             continue  # pending or unscorable: never record as zero
@@ -234,13 +235,15 @@ def recovery_rows(records, sleep_end_by_id):
         day = sleep_end_by_id.get(str(r.get("sleep_id"))) or local_date(r.get("created_at"))
         if not day:
             continue
+        if r.get("cycle_id") is not None:
+            day_by_cycle[str(r["cycle_id"])] = day
         for key, val in (("whoop_recovery", s.get("recovery_score")),
                          ("whoop_hrv", s.get("hrv_rmssd_milli")),
                          ("resting_hr", s.get("resting_heart_rate")),
                          ("skin_temp_c", s.get("skin_temp_celsius"))):  # WHOOP 4.0+; absent on older straps
             if val is not None:
                 rows.append((day, key, round(float(val), 1)))
-    return rows
+    return rows, day_by_cycle
 
 
 def sleep_rows(records):
@@ -268,12 +271,30 @@ def sleep_rows(records):
     return rows, end_by_id
 
 
-def cycle_rows(records):
+def cycle_day(c, day_by_cycle):
+    """The day a cycle's strain and calories belong to.
+
+    A WHOOP cycle starts when you fall asleep (usually the evening before) and runs until the next
+    sleep, so its start date is normally the previous day. The cycle belongs to the day you were
+    awake in it: the same day as the recovery scored for it. Without a recovery, use the start
+    plus 12 hours (sleep onset at 10:30pm -> 10:30am the next day; at 1am -> 1pm the same day).
+    """
+    day = day_by_cycle.get(str(c.get("id")))
+    if day:
+        return day
+    t = parse_ts(c.get("start"))
+    if not t:
+        return None
+    t = t + dt.timedelta(hours=12)
+    return (t.astimezone(LOCAL_TZ) if LOCAL_TZ else t.astimezone()).date().isoformat()
+
+
+def cycle_rows(records, day_by_cycle=None):
     rows = []
     for c in records:
         if c.get("score_state") != "SCORED" or not c.get("score"):
             continue
-        day = local_date(c.get("start"))
+        day = cycle_day(c, day_by_cycle or {})
         if not day:
             continue
         s = c["score"]
@@ -289,6 +310,14 @@ def local_dt(ts):
     if not t:
         return None
     return (t.astimezone(LOCAL_TZ) if LOCAL_TZ else t.astimezone()).strftime("%Y-%m-%d %H:%M")
+
+
+def pct(v):
+    """WHOOP reports percent_recorded as a 0-1 fraction; store it as 0-100 so 'under 80' means what it says."""
+    if v is None:
+        return None
+    v = float(v)
+    return round(v * 100, 1) if v <= 1 else round(v, 1)
 
 
 def workout_rows(records):
@@ -314,7 +343,7 @@ def workout_rows(records):
             "max_hr": s.get("max_heart_rate"),
             "kcal": round(float(kj) / 4.184) if kj is not None else None,
             "distance_m": s.get("distance_meter"),
-            "percent_recorded": s.get("percent_recorded"),
+            "percent_recorded": pct(s.get("percent_recorded")),
             "z0_min": mins("zone_zero_milli"), "z1_min": mins("zone_one_milli"),
             "z2_min": mins("zone_two_milli"), "z3_min": mins("zone_three_milli"),
             "z4_min": mins("zone_four_milli"), "z5_min": mins("zone_five_milli"),
@@ -372,9 +401,9 @@ def cmd_sync(args):
         sleeps = fetch_all("/activity/sleep", iso(start), iso(end))
         s_rows, end_by_id = sleep_rows(sleeps)
         recs = fetch_all("/recovery", iso(start), iso(end))
-        r_rows = recovery_rows(recs, end_by_id)
+        r_rows, day_by_cycle = recovery_rows(recs, end_by_id)
         cycles = fetch_all("/cycle", iso(start), iso(end))
-        c_rows = cycle_rows(cycles)
+        c_rows = cycle_rows(cycles, day_by_cycle)
         workouts = fetch_all("/activity/workout", iso(start), iso(end))
         w_rows = workout_rows(workouts)
     except RuntimeError as e:
